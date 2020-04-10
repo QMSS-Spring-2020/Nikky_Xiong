@@ -1,0 +1,298 @@
+---
+title: "LDA Modelling with 2017 2.0"
+author: "Nikky Xiong"
+date: "March 27, 2020"
+output: html_document
+---
+
+```{r global options, warning=FALSE, message=FALSE, cache=FALSE}
+set.seed(1:7)
+library(knitr)
+opts_chunk$set(warning = F,message = F,error = F)
+library(readr)
+library(dplyr)
+library(tidytext)
+library(lubridate)
+library(tm)
+library(topicmodels)
+library(ggplot2)
+library(SnowballC)
+library(wordcloud)
+library(RColorBrewer)
+library(LDAvis)
+require(RWeka)
+library(quanteda)
+
+df <- readr::read_csv('complaints.csv') %>% 
+    filter(`Consumer complaint narrative` != 'NA') %>% 
+    filter(`Company response to consumer` == 'Closed with monetary relief') %>%
+    mutate(year = as.integer(substr(`Date received`, 
+                                  start = 1, stop = 4))) %>%
+    mutate(month = as.integer(substr(`Date received`, 
+                                   start = 6, stop = 7))) %>%
+    mutate(day = as.integer(substr(`Date received`, start =9 , stop = 10))) 
+df$`Date received` <- ymd(df$`Date received`) 
+df <- df %>% filter(year == '2017')
+```
+
+The dataframe contains complaints with narrative made in 2019 and were closed with monetary relief (5655 observations).
+
+# Unigram with WordCloud
+
+```{r, warning=FALSE, message=FALSE}
+narrative <- df %>% 
+    unnest_tokens(word, `Consumer complaint narrative`) %>%
+    anti_join(stop_words)
+narrative <- narrative %>% 
+    filter(!(word %in% c("xxxx", "xx")))
+na <- narrative %>% 
+    count(word, sort = TRUE) %>%
+    head(25)
+na
+```
+
+```{r, warning=FALSE, message=FALSE}
+wordcloud(words = na$word, freq = na$n, min.freq = 1,
+          max.words=300, random.order=FALSE, rot.per=0.35, 
+          colors=brewer.pal(8, "Dark2"))
+```
+
+# Bigrams with WordCloud
+
+```{r, warning=FALSE, message=FALSE}
+myDfm <- tokens(df$`Consumer complaint narrative`) %>%
+    tokens_remove("\\p{P}", valuetype = "regex", padding = TRUE) %>%
+    tokens_remove(stopwords("english"), padding  = TRUE) %>%
+    tokens_remove("^x", valuetype = "regex", padding = TRUE) %>% 
+    tokens_ngrams(n = 2) %>%
+    dfm()
+topfeatures(myDfm)
+```
+
+```{r, warning=FALSE, message=FALSE}
+textplot_wordcloud(myDfm, rotation = 0.25,
+                   color = rev(RColorBrewer::brewer.pal(10, "RdBu")))
+```
+
+# Trigrams with WordCloud
+
+```{r}
+myDfm <- tokens(df$`Consumer complaint narrative`) %>%
+    tokens_remove("\\p{P}", valuetype = "regex", padding = TRUE) %>%
+    tokens_remove(stopwords("english"), padding  = TRUE) %>%
+    tokens_remove("^x", valuetype = "regex", padding = TRUE) %>% tokens_remove("+") %>%
+    tokens_ngrams(n = 3) %>%
+    dfm()
+topfeatures(myDfm)
+```
+
+```{r, warning=FALSE, message=FALSE}
+col <- sapply(seq(0.1, 1, 0.1), function(x)      adjustcolor("#1F78B4", x))
+textplot_wordcloud(myDfm, adjust = 0.5, random_order = FALSE,
+                   color = col, rotation = FALSE)
+```
+
+# Quan(?)grams with WordCloud
+
+```{r}
+myDfm <- tokens(df$`Consumer complaint narrative`) %>%
+    tokens_remove("\\p{P}", valuetype = "regex", padding = TRUE) %>%
+    tokens_remove(stopwords("english"), padding  = TRUE) %>%
+    tokens_remove("^x", valuetype = "regex", padding = TRUE) %>% 
+  tokens_remove("+") %>%
+    tokens_ngrams(n = 4) %>%
+    dfm()
+topfeatures(myDfm)
+```
+
+```{r, warning=FALSE, message=FALSE}
+col <- sapply(seq(0.1, 1, 0.1), function(x)      adjustcolor("#1F78B4", x))
+textplot_wordcloud(myDfm, adjust = 0.5, random_order = FALSE,
+                   color = col, rotation = FALSE)
+```
+
+# Function to Clean Corpus
+
+Write a function to clean up the corpus, including removing “xxxx” in the narrative
+
+```{r}
+removeNumPunct <- function(x){gsub("[^[:alpha:][:space:]]*", "", x)}
+
+removeXs <- function(x){gsub("[Xx]{2,}", "", x)}
+
+clean_corpus <- function(corpus){
+  
+  corpus <- tm_map(corpus, removePunctuation)
+  
+  #corpus <- tm_map(corpus, removeWords, c("XXXX", "XXXXXXXX", "XXXXXXXXXXXXXXXX", "XXXXXXXX"))
+  
+  corpus <- tm_map(corpus, content_transformer(removeXs))
+  
+  corpus <- tm_map(corpus, content_transformer(tolower))
+  
+  #corpus <- tm_map(corpus, content_transformer(replace_symbol))
+  
+  corpus <- tm_map(corpus, removeWords, c(stopwords("en"))) 
+  
+  # We could add more stop words as above
+  corpus <- tm_map(corpus, removeNumbers)
+  
+  corpus <- tm_map(corpus, content_transformer(removeNumPunct))
+  
+  corpus <- tm_map(corpus, stripWhitespace)
+  
+  return(corpus)
+}
+```
+
+# Function to Perform Unigram LDA
+
+Write a function that takes a text column from a data frame and returns a plot of the most informative words (Unigram) for a given number of topics.
+
+```{r}
+# function to get & plot the most informative terms by a specificed number
+# of topics, using LDA
+top_terms_by_topic_LDA <- function(input_text, # should be a columm from a dataframe
+                                   plot = T, # return a plot? TRUE by defult
+                                   number_of_topics = 5) # number of topics (5 by default)
+{    
+    # create a corpus (type of object expected by tm) and document term matrix
+    Corpus <- Corpus(VectorSource(input_text)) # make a corpus object
+    Corpus <- clean_corpus(Corpus) 
+    DTM <- DocumentTermMatrix(Corpus) # get the count of words/document
+
+    # remove any empty rows in our document term matrix (if there are any 
+    # we'll get an error when we try to run our LDA)
+    unique_indexes <- unique(DTM$i) # get the index of each unique value
+    DTM <- DTM[unique_indexes,] # get a subset of only those indexes
+       # preform LDA & get the words/topic in a tidy text format
+    lda <- LDA(DTM, k = number_of_topics, control = list(seed = 12345))
+    topics <- tidy(lda, matrix = "beta")
+
+    # get the top ten terms for each topic
+    top_terms <- topics  %>% # take the topics data frame and..
+      group_by(topic) %>% # treat each topic as a different group
+      top_n(5, beta) %>% # get the top 10 most informative words
+      ungroup() %>% # ungroup
+      arrange(topic, -beta) # arrange words in descending informativeness
+
+    # if the user asks for a plot (TRUE by default)
+    if(plot == T){
+        # plot the top ten terms for each topic in order
+        top_terms %>% # take the top terms
+          mutate(term = reorder(term, beta)) %>% # sort terms by beta value 
+          ggplot(aes(term, beta, fill = factor(topic))) + # plot beta by theme
+          geom_col(show.legend = FALSE) + # as a bar plot
+          facet_wrap(~ topic, scales = "free") + # which each topic in a seperate plot
+          labs(x = NULL, y = "Beta") + # no x label, change y label 
+          coord_flip() # turn bars sideways
+    }else{   # if the user does not request a plot
+        # return a list of sorted terms instead
+        return(top_terms)
+    }
+}
+```
+
+
+```{r, warning=FALSE}
+top_terms_by_topic_LDA(df$`Consumer complaint narrative`, number_of_topics = 7)
+```
+
+# Visualization with LDAvis
+
+### Pre-processing
+
+```{r}
+stop_words <- stopwords(source = "smart")
+
+# pre-processing:
+reviews <- gsub("'", "", df$`Consumer complaint narrative`)  # remove apostrophes
+reviews <- gsub("[[:punct:]]", " ", reviews)  # replace punctuation with space
+reviews <- gsub("[[:cntrl:]]", " ", reviews)  # replace control characters with space
+reviews <- gsub("^[[:space:]]+", "", reviews) # remove whitespace at beginning of documents
+reviews <- gsub("[[:space:]]+$", "", reviews) # remove whitespace at end of documents
+reviews <- gsub("+", "", reviews) 
+reviews <- gsub("X", "", reviews) 
+reviews <- gsub("x", "", reviews) 
+
+reviews <- tolower(reviews)  # force to lowercase
+
+# tokenize on space and output as a list:
+doc.list <- strsplit(reviews, "[[:space:]]+")
+
+# compute the table of terms:
+term.table <- table(unlist(doc.list))
+term.table <- sort(term.table, decreasing = TRUE)
+
+# remove terms that are stop words or occur fewer than 5 times:
+del <- names(term.table) %in% stop_words | term.table < 5
+term.table <- term.table[!del]
+vocab <- names(term.table)
+
+# now put the documents into the format required by the lda package:
+get.terms <- function(x) {
+  index <- match(x, vocab)
+  index <- index[!is.na(index)]
+  rbind(as.integer(index - 1), as.integer(rep(1, length(index))))
+}
+documents <- lapply(doc.list, get.terms)
+```
+
+### Using the R package 'lda' for model fitting
+
+```{r}
+# Compute some statistics related to the data set:
+D <- length(documents)  # number of documents
+W <- length(vocab)  # number of terms in the vocab (14,568)
+doc.length <- sapply(documents, function(x) sum(x[2, ]))  # number of tokens per document [312, 288, 170, 436, 291, ...]
+N <- sum(doc.length)  # total number of tokens in the data (546,827)
+term.frequency <- as.integer(term.table)  # frequencies of terms in the corpus [8939, 5544, 2411, 2410, 2143, ...]
+N
+```
+
+```{r, echo=FALSE}
+# MCMC and model tuning parameters:
+K <- 20
+G <- 5000
+alpha <- 0.02
+eta <- 0.02
+
+# Fit the model:
+library(lda)
+set.seed(357)
+t1 <- Sys.time()
+fit <- lda.collapsed.gibbs.sampler(documents = documents, K = K, vocab = vocab, num.iterations = G, alpha = alpha, eta = eta, initial = NULL, burnin = 0, compute.log.likelihood = TRUE)
+t2 <- Sys.time()
+t2 - t1  # about 18 minutes on laptop
+```
+
+# Visualizing the fitted model with LDAvis
+
+```{r}
+theta <- t(apply(fit$document_sums + alpha, 2, function(x) x/sum(x)))
+phi <- t(apply(t(fit$topics) + eta, 2, function(x) x/sum(x)))
+```
+
+```{r}
+MovieReviews <- list(phi = phi,
+                     theta = theta,
+                     doc.length = doc.length,
+                     vocab = vocab,
+                     term.frequency = term.frequency)
+```
+
+```{r, error = T}
+library(LDAvis)
+
+# create the JSON object to feed the visualization:
+json <- createJSON(phi = MovieReviews$phi, 
+                   theta = MovieReviews$theta, 
+                   doc.length = MovieReviews$doc.length, 
+                   vocab = MovieReviews$vocab, 
+                   term.frequency = MovieReviews$term.frequency)
+```
+
+```{r, error = T}
+serVis(json, out.dir = 'vis', open.browser = FALSE)
+```
+

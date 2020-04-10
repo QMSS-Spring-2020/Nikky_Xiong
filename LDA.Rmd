@@ -1,0 +1,186 @@
+---
+title: "Predictive Model after LDA"
+author: "Nikky Xiong"
+date: "April 7, 2020"
+output: 
+    html_document:
+    keep_md: true
+---
+
+```{r global options, warning=FALSE, message=FALSE, cache=TRUE}
+set.seed(1:7)
+library(knitr)
+library(readr)
+library(dplyr)
+library(tidytext)
+library(lubridate)
+library(tm)
+library(topicmodels)
+library(ggplot2)
+library(SnowballC)
+
+df <- readr::read_csv('complaints.csv') %>% 
+    filter(`Consumer complaint narrative` != 'NA') %>%
+    mutate(year = as.integer(substr(`Date received`, 
+                                  start = 1, stop = 4))) %>%
+    mutate(month = as.integer(substr(`Date received`, 
+                                   start = 6, stop = 7))) %>%
+    mutate(day = as.integer(substr(`Date received`, start =9 , stop = 10))) 
+df$`Date received` <- ymd(df$`Date received`) 
+df <- df %>% filter(year == '2018')
+df$`Company response to consumer` = ifelse((df$`Company response to consumer` == 'Closed with monetary relief'), 1, 0)
+```
+
+```{r, cache=TRUE}
+Data <- as.data.frame(df$`Consumer complaint narrative`)
+```
+
+# by key words counts
+
+```{r, cache=TRUE}
+for(i in 1:dim(Data)[2]){
+    Data[,i]<-as.character(Data[,i])}
+Mat<-as.matrix(Data)
+
+# key topics from LDA
+SearchFunc<-function(X){
+    Xsep<-unlist(strsplit(X, " ")); 
+    length(which(Xsep%in%KeyWords0))}
+KWcount0<-data.frame(KWC0=unlist(lapply(t(Mat), SearchFunc)))
+
+KeyWords1<-c("account", "bank", "card", "credit", "pay",
+            'told', 'called', 'received', 'time')
+# key topics from LDA
+SearchFunc<-function(X){
+    Xsep<-unlist(strsplit(X, " ")); 
+    length(which(Xsep%in%KeyWords1))}
+KWcount1<-data.frame(KWC1=unlist(lapply(t(Mat), SearchFunc)))
+KeyWords2<-c("card", "account", "credit", "payment", "late")
+# key topics from LDA
+SearchFunc<-function(X){
+    Xsep<-unlist(strsplit(X, " ")); 
+    length(which(Xsep%in%KeyWords2))}
+KWcount2<-data.frame(KWC2=unlist(lapply(t(Mat), SearchFunc)))
+KeyWords3<-c("card", "bank", "chase", "fraud", "money")
+# key topics from LDA
+SearchFunc<-function(X){
+    Xsep<-unlist(strsplit(X, " ")); 
+    length(which(Xsep%in%KeyWords3))}
+KWcount3<-data.frame(KWC3=unlist(lapply(t(Mat), SearchFunc)))
+KeyWords4<-c("account", "credit", "dispute", "citibank", "received")
+# key topics from LDA
+SearchFunc<-function(X){
+    Xsep<-unlist(strsplit(X, " ")); 
+    length(which(Xsep%in%KeyWords4))}
+KWcount4<-data.frame(KWC4=unlist(lapply(t(Mat), SearchFunc)))
+KeyWords5<-c("wells", "fargo", "bank", "payment", "check")
+# key topics from LDA
+SearchFunc<-function(X){
+    Xsep<-unlist(strsplit(X, " ")); 
+    length(which(Xsep%in%KeyWords5))}
+KWcount5<-data.frame(KWC5=unlist(lapply(t(Mat), SearchFunc)))
+KeyWords6<-c("account", "called", "said", "told", "call")
+# key topics from LDA
+SearchFunc<-function(X){
+    Xsep<-unlist(strsplit(X, " ")); 
+    length(which(Xsep%in%KeyWords6))}
+KWcount6<-data.frame(KWC6=unlist(lapply(t(Mat), SearchFunc)))
+KeyWords7<-c("loan", "payment", "told", "mortgage", "pay")
+# key topics from LDA
+SearchFunc<-function(X){
+    Xsep<-unlist(strsplit(X, " ")); 
+    length(which(Xsep%in%KeyWords7))}
+KWcount7<-data.frame(KWC7=unlist(lapply(t(Mat), SearchFunc)))
+KeyWords8<-c("account", "bank", "fees", "america", "check")
+# key topics from LDA
+SearchFunc<-function(X){
+    Xsep<-unlist(strsplit(X, " ")); 
+    length(which(Xsep%in%KeyWords8))}
+KWcount8<-data.frame(KWC8=unlist(lapply(t(Mat), SearchFunc)))
+```
+
+# add all back to df
+
+```{r, warning=FALSE}
+dff <- df %>%
+    select(money = `Company response to consumer`) %>% 
+    cbind(KWcount1, KWcount2, KWcount3, KWcount4, 
+          KWcount5, KWcount6, KWcount7, KWcount8)
+```
+
+# LDA
+
+```{r}
+# Calculate N
+N <- nrow(dff)
+
+# Create a random number vector
+rvec <- runif(N)
+
+# Select rows from the dataframe
+dff.train <- dff[rvec < 0.75,]
+dff.test <- dff[rvec >= 0.75,]
+
+# Check the number of observations (88905 in this case)
+nrow(dff.train)
+```
+
+```{r}
+nrow(dff.test)
+# 29588 test data
+```
+
+```{r}
+library(MASS)
+
+dff.train.df <- dff.train
+
+# convert matrix to a dataframe
+dff.train.df <- as.data.frame(dff.train)
+
+# Perform LDA on diagnosis
+dff.lda <- lda(money ~ KWC1 + KWC2 + KWC3 + 
+    KWC4 + KWC5 + KWC6 + KWC7 + KWC8, 
+               data = dff.train.df)
+```
+
+```{r}
+# summary of the lda result 
+dff.lda
+```
+
+```{r}
+# test the prediction
+dff.test.df <- dff.test
+
+# convert matrix to a dataframe
+dff.test.df <- as.data.frame(dff.test)
+
+dff.predict <- predict(dff.lda, newdata = dff.test.df)
+```
+
+```{r}
+ls(dff.predict)
+```
+
+```{r}
+# model evaluation with ROC and AUC
+library("ROCR")
+```
+
+```{r}
+# Get the posteriors as a dataframe.
+dff.predict.posteriors <- as.data.frame(dff.predict$posterior)
+
+# Evaluate the model
+pred <- prediction(dff.predict.posteriors[,2], dff.test.df$money)
+roc.perf = performance(pred, measure = "tpr", x.measure = "fpr")
+auc.train <- performance(pred, measure = "auc")
+auc.train <- auc.train@y.values
+plot(roc.perf)
+abline(a=0, b= 1)
+text(x = .40, y = .6,paste("AUC = ", round(auc.train[[1]],3), sep = ""))
+```
+
+perform ok
+
