@@ -25,6 +25,7 @@ library(geojsonio)
 library(usmap)
 library(tidycensus)
 library(gapminder)
+library(leaflet)
 
 ########################
 # Read in Cleaned Data #
