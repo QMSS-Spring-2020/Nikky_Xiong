@@ -1,0 +1,157 @@
+---
+title: "Predictive Model after LDA"
+author: "Nikky Xiong"
+date: "March 27, 2020"
+output: 
+    html_document:
+    keep_md: true
+---
+
+```{r global options,echo=F, warning=FALSE, message=FALSE, cache=TRUE}
+set.seed(1:7)
+library(knitr)
+opts_chunk$set(warning = F,message = F,error = F)
+library(readr)
+library(dplyr)
+library(tidytext)
+library(lubridate)
+library(tm)
+library(topicmodels)
+library(ggplot2)
+library(SnowballC)
+
+df <- readr::read_csv('complaints.csv') %>% 
+    filter(`Consumer complaint narrative` != 'NA') %>%
+    mutate(year = as.integer(substr(`Date received`, 
+                                  start = 1, stop = 4))) %>%
+    mutate(month = as.integer(substr(`Date received`, 
+                                   start = 6, stop = 7))) %>%
+    mutate(day = as.integer(substr(`Date received`, start =9 , stop = 10))) 
+df$`Date received` <- ymd(df$`Date received`) 
+df <- df %>% filter(year == '2018')
+df$`Company response to consumer` = ifelse((df$`Company response to consumer` == 'Closed with monetary relief'), 1, 0)
+```
+
+```{r, cache=TRUE}
+Data <- as.data.frame(df$`Consumer complaint narrative`)
+```
+
+# by key words counts
+
+```{r, cache=TRUE}
+for(i in 1:dim(Data)[2]){
+    Data[,i]<-as.character(Data[,i])}
+Mat<-as.matrix(Data)
+KeyWords1<-c("account", "bank", "card", "credit", "pay",
+            'told', 'called', 'received', 'time')
+# key topics from LDA
+SearchFunc<-function(X){
+    Xsep<-unlist(strsplit(X, " ")); 
+    length(which(Xsep%in%KeyWords1))}
+KWcount1<-data.frame(KWC1=unlist(lapply(t(Mat), SearchFunc)))
+KeyWords2<-c("fee", "balance", "late", "charged", "fee")
+# key topics from LDA
+SearchFunc<-function(X){
+    Xsep<-unlist(strsplit(X, " ")); 
+    length(which(Xsep%in%KeyWords2))}
+KWcount2<-data.frame(KWC2=unlist(lapply(t(Mat), SearchFunc)))
+KeyWords3<-c("money", "check", "call", "bank", "loan")
+# key topics from LDA
+SearchFunc<-function(X){
+    Xsep<-unlist(strsplit(X, " ")); 
+    length(which(Xsep%in%KeyWords3))}
+KWcount3<-data.frame(KWC3=unlist(lapply(t(Mat), SearchFunc)))
+KeyWords4<-c("charges", "transaction", "fraud", "company", "mortgage")
+# key topics from LDA
+SearchFunc<-function(X){
+    Xsep<-unlist(strsplit(X, " ")); 
+    length(which(Xsep%in%KeyWords4))}
+KWcount4<-data.frame(KWC4=unlist(lapply(t(Mat), SearchFunc)))
+```
+
+# by key words proportion
+
+```{r, cache=TRUE}
+for(i in 1:dim(Data)[2]){Data[,i]<-as.character(Data[,i])}
+Mat<-as.matrix(Data)
+Keyfreq1<-c("account", "bank", "card", "credit", "pay",
+            'told', 'called', 'received', 'time')
+# key topics from LDA
+SearchFunc<-function(X){
+    Xsep<-unlist(strsplit(X, " ")); 
+    length(which(Xsep%in%Keyfreq1))}
+KWfreq1<-data.frame(KWF1=unlist(lapply(t(Mat), SearchFunc)))
+Keyfreq2<-c("fee", "balance", "late", "charged", "fee")
+# key topics from LDA
+SearchFunc<-function(X){
+    Xsep<-unlist(strsplit(X, " ")); 
+    length(which(Xsep%in%Keyfreq2))}
+KWfreq2<-data.frame(KWF2=unlist(lapply(t(Mat), SearchFunc)))
+Keyfreq3<-c("money", "check", "call", "bank", "loan")
+# key topics from LDA
+SearchFunc<-function(X){
+    Xsep<-unlist(strsplit(X, " ")); 
+    length(which(Xsep%in%Keyfreq3))}
+KWfreq3<-data.frame(KWF3=unlist(lapply(t(Mat), SearchFunc)))
+Keyfreq4<-c("charges", "transaction", "fraud", "company", "mortgage")
+# key topics from LDA
+SearchFunc<-function(X){
+    Xsep<-unlist(strsplit(X, " ")); 
+    length(which(Xsep%in%Keyfreq4))}
+KWfreq4<-data.frame(KWF4=unlist(lapply(t(Mat), SearchFunc)))
+```
+
+# add all back to df
+
+```{r, warning=FALSE}
+dff <- df %>%
+    select(money = `Company response to consumer`) %>% 
+    cbind(KWcount1, KWcount1, KWcount3, KWcount4,
+          KWfreq1, KWfreq2, KWfreq3, KWfreq4)
+
+library(caret)
+
+dff$money <- factor(dff$money,
+                    labels = c("withmoney", "nomoney"), 
+                    levels = 1:0)
+set.seed(12345)
+in_train <- createDataPartition(y = dff$money, 
+                                p = 0.8, list = FALSE)
+training <- dff[ in_train, ]
+testing  <- dff[-in_train, ]
+```
+
+# modeling-NN
+
+```{r, cache=TRUE, warning=FALSE}
+nnetGrid <- expand.grid(.decay = c(0, 0.01, .1),
+                        .size = c(1:10))
+ctrl_nn <- trainControl(method = "cv", number = 10)
+
+nn <- train(money ~ KWC1 + KWC1 + KWC3 + KWC4 +
+                KWF1 + KWF2 + KWF3 + KWF4, 
+            data = training, method = "nnet",
+            trControl = ctrl_nn, tuneGrid = nnetGrid,
+            preProcess = c("center", "scale"), trace = FALSE)
+y_hat_nn <- predict(nn, newdata = testing)
+z_logit <- factor(y_hat_nn > 0.5, 
+                  levels = c(TRUE, FALSE), 
+                  labels = c("withmoney", "nomoney"))
+confusionMatrix(y_hat_nn, reference = testing$money)
+```
+
+# modeling-logit
+
+```{r, cache=TRUE,warning=FALSE}
+logit <- glm(money ~ KWC1 + KWC1 + KWC3 + KWC4 +
+                KWF1 + KWF2 + KWF3 + KWF4, 
+             data = training, family = binomial(link = "logit"))
+
+y_hat_logit <- predict(logit, newdata = testing, type = "response")
+z_logit <- factor(y_hat_logit > 0.5, 
+                  levels = c(TRUE, FALSE), 
+                  labels = c("withmoney", "nomoney"))
+
+confusionMatrix(z_logit, reference = testing$money)
+```
+

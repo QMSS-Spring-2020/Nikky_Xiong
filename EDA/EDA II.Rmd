@@ -1,0 +1,144 @@
+---
+title: "EDA Version II"
+author: "Nikky Xiong"
+date: "Feb 26, 2020"
+output: html_document
+---
+
+```{r global options,echo=F, warning=FALSE, message=FALSE, cache=FALSE}
+set.seed(1:7)
+library(knitr)
+opts_chunk$set(warning = F,message = F,error = F)
+library(readr)
+library(dplyr)
+library(tidytext)
+library(ggplot2)
+library(wordcloud)
+library(RColorBrewer)
+library(DT)
+library(lubridate)
+library(ggthemes)
+library(scales)
+library(plotly)
+library(stringr)
+library(caret)
+library(randomForest)
+df_raw <- readr::read_csv('complaints.csv')
+```
+
+<br/>
+
+```{r echo=F, warning=FALSE, message=FALSE, cache=FALSE}
+df <- df_raw %>%
+  mutate(year = as.integer(substr(`Date received`, 
+                                  start = 1, stop = 4))) %>%
+  mutate(month = as.integer(substr(`Date received`, 
+                                   start = 6, stop = 7))) %>%
+  mutate(day = as.integer(substr(`Date received`, start =9 , stop = 10)))
+df$`Date received` <- ymd(df$`Date received`)
+```
+
+```{r echo=F, warning=FALSE, message=FALSE, cache=FALSE}
+p <- df %>% 
+  mutate(date = as.POSIXct(paste(month , day , sep = "." ), 
+                           format = "%m.%d" )) %>%
+  group_by(date, `Company response to consumer`) %>%
+  summarise(number_of_complaints = n())
+
+pp <- ggplot(p, aes(x = date, y = number_of_complaints,
+             color = `Company response to consumer`)) +
+  geom_line()+
+  ylab("Number of complaints") +
+  theme_tufte() +
+  scale_x_datetime(labels= date_format("%b"), 
+                   date_breaks = '1 month') + 
+  theme(plot.title = element_text(size=14, face="bold", hjust = 0.5),
+        legend.text = element_text(size=8),
+        legend.title = element_text(size=8),
+        axis.text.x = element_text(angle = 45)) +
+  ggtitle("Overall Number of Complaints throughout a Year")
+ggplotly(pp)
+```
+
+__There is no seasonable or periodic pattern behind these complaints.__
+
+<br/>
+<br/>
+
+```{r echo=F, warning=FALSE, message=FALSE, cache=FALSE}
+df_new <- df %>% 
+  mutate(date = as.POSIXct(paste(month , day , sep = "." ), 
+                           format = "%m.%d" )) %>%
+  group_by(date, Company, Product, State, 
+           `Submitted via`, `Company response to consumer`) %>%
+  summarise(number_of_complaints = n()) %>% 
+  arrange(desc(number_of_complaints)) %>% 
+  head(100)
+
+pretty_headers <- 
+  gsub("[.]", " ", colnames(df_new)) %>%
+  str_to_title()
+
+df_new %>%
+  datatable(
+    caption = 'Table 1: This is a simple data table for the complaints.',
+    rownames = FALSE,
+    class = 'cell-border stripe',
+    colnames = pretty_headers,
+    filter = list(position = "top"),
+    options = list(
+      dom = "Bfrtip",
+      buttons = I("colvis"),
+      language = list(sSearch = "Filter:")
+    ),
+    extensions = c("Buttons", "Responsive")
+  )
+```
+
+<br/>
+<br/>
+
+### Machine Learning Trail #1
+
+```{r}
+df_ml <- df_raw %>% 
+  filter(df_raw$Company == 'EQUIFAX, INC.') %>% 
+  select(Product, State, `Company response to consumer`,
+         `Company public response`, 
+         `Consumer complaint narrative`, `Consumer consent provided?`)
+df_ml$`Company response to consumer` <- ifelse(df_ml$`Company response to consumer` == "Closed with monetary relief", 1, 0)
+df_ml$`Consumer consent provided?` <- ifelse(df_ml$`Consumer consent provided?` == "Consent provided", 1, 0)
+df_ml$`Consumer complaint narrative` <- ifelse(df_ml$`Consumer complaint narrative` == 'NA', 0, 1)
+df_ml$`Consumer complaint narrative`[is.na(df_ml$`Consumer complaint narrative`)] <- 0
+df_ml$`Company public response` <- ifelse(df_ml$`Company public response` == 'NA', 0, 1)
+df_ml$`Company public response`[is.na(df_ml$`Company public response`)] <- 0
+df_ml <- df_ml %>% 
+  filter(is.na(`Company public response`) == FALSE) %>% 
+  filter(is.na(`Consumer complaint narrative`) == FALSE) %>% 
+  filter(is.na(`Consumer consent provided?`) == FALSE) 
+```
+
+```{r}
+df_ml$`Company response to consumer` <- 
+  factor(df_ml$`Company response to consumer`,                                    labels = c("withMonetaryRelief",                                                      "noMonetaryRelief"), 
+                     levels = 1:0) 
+
+set.seed(12345)
+in_train <- createDataPartition(y = df_ml$`Company response to consumer`, 
+                                p = 0.8, list = FALSE)
+training <- df_ml[ in_train, ]
+testing  <- df_ml[-in_train, ]
+```
+
+```{r}
+rf <- randomForest(`Company response to consumer` ~ 
+                    as.factor(training$Product) + 
+                    training$`Company response to consumer` +
+                    training$`Company public response` +
+                    training$`Consumer complaint narrative` +
+                    training$`Consumer consent provided?`, 
+                  data=training,
+                  importance = TRUE,
+                  na.action = na.omit)
+```
+

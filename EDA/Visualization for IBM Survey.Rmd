@@ -1,0 +1,74 @@
+---
+title: "Visualization for IBM Survey"
+author: "Nikky Xiong"
+date: "Feb 6, 2020"
+output: html_document
+---
+
+This is the analysis for the first week of this project, aiming to map out a guide line for the future data exploratory work, like data exploration for certain type of complaints or for one company, text mining, predictive models, and maps. Things that we can dive into for EDA include data summary by companies, products, issues, states. Also, visualization that we can show include world cloud, line charts, scatter plots, and bar charts. We can try to integrate other data resources, such as the total population of each states to make further analysis.
+
+```{r global options,echo=F}
+set.seed(1:7)
+library(knitr)
+opts_chunk$set(warning = F,message = F,error = F)
+```
+
+```{r, warning=FALSE, message=FALSE}
+library(readr)
+library(dplyr)
+library(tidytext)
+library(ggplot2)
+library(wordcloud)
+library(RColorBrewer)
+```
+
+#### data summary 
+
+```{r}
+df <- readr::read_csv('complaints.csv')
+df %>% summary()
+df <- df %>% head(500)
+```
+
+#### text cleaning function
+
+```{r}
+clean_text <- function(variable){
+    
+    text = tibble(txt = variable)
+    
+    text <- text %>% 
+    unnest_tokens(word, txt) %>% 
+    anti_join(stop_words) %>%   
+    na.omit() %>% 
+    count(word, sort = TRUE)
+    
+    return(text)
+}
+```
+
+#### text cleaning by variables
+
+```{r, message=FALSE, warning=FALSE}
+product <- clean_text(df$Product)
+issue <- clean_text(df$Issue)
+complaints <- clean_text(df$`Consumer complaint narrative`)
+response <- clean_text(df$`Company public response`)
+```
+
+#### visualization
+
+```{r}
+wordcloud(words = product$word, freq = product$n, 
+          colors=brewer.pal(6, "Dark2"), min.freq = 1)
+```
+
+___`Credit` is the most important and the most frequently mentioned key words in the products. `Consumer`, `reports`, `perosnl`, `repair`, and `services` are also worth paying attention to.___
+
+
+```{r}
+wordcloud(words = issue$word, freq = issue$n, 
+          colors=brewer.pal(6, "Dark2"), min.freq = 1)
+```
+
+___`Report[ing] incorrect information` seems to be the most important and the most frequently mentioned key words in the issues.___

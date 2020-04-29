@@ -1,0 +1,11 @@
+base
+knitr
+readr
+dplyr
+tidytext
+lubridate
+NLP
+tm
+topicmodels
+ggplot2
+SnowballC
