@@ -202,11 +202,15 @@ leaflet(states) %>%
     addLegend(pal = pal, values = ~density, opacity = 0.7, title = NULL,
               position = "bottomright")
 
-
 library(reticulate)
 if(!("r-reticulate" %in% conda_list()$name)){ ## r-reticulate is not in conda environment
     conda_create("r-reticulate", packages = c("python", "scikit-learn", "pandas"))
-    }
+}
+
+conda_install("r-reticulate", "scikit-learn")
+conda_install('r-reticulate', 'pandas')
+use_condaenv("r-reticulate", required = TRUE)
+
 #conda_remove("r-reticulate")
 use_condaenv("r-reticulate", required = TRUE)
 #irtualenv_create("r-reticulate")
