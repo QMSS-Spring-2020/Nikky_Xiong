@@ -27,6 +27,7 @@ library(tidycensus)
 library(gapminder)
 library(leaflet)
 
+
 ########################
 # Read in Cleaned Data #
 ########################
@@ -201,6 +202,20 @@ leaflet(states) %>%
     addLegend(pal = pal, values = ~density, opacity = 0.7, title = NULL,
               position = "bottomright")
 
+
+library(reticulate)
+if(!("r-reticulate" %in% conda_list()$name)){ ## r-reticulate is not in conda environment
+    conda_create("r-reticulate", packages = c("python", "scikit-learn", "pandas"))
+    }
+#conda_remove("r-reticulate")
+use_condaenv("r-reticulate", required = TRUE)
+#irtualenv_create("r-reticulate")
+#virtualenv_install("r-reticulate", "scikit-learn")
+#virtualenv_install("r-reticulate", "pandas")
+#use_virtualenv("r-reticulate", required = TRUE)
+source_python('predict_narrative.py')
+
+
 ##############
 #     UI     #
 ##############
@@ -296,6 +311,34 @@ ui = fluidPage(
         tabPanel(
             "Unsupervised Learning - LDA",
             tabPanel("", includeHTML("LDA.html"))
+        ),
+        
+        # Tab for Supervised Learning- LinearSVC Model
+        tabPanel("Supervised Learning- LinearSVC",
+            sidebarLayout(
+                sidebarPanel(
+                    
+                    # Drop down to choose product
+                    pickerInput("product_select", "Product:",   
+                                choices = c("Mortgage","Credit Card"), # Credit Card is not working right now.
+                                selected = c("Mortgage"),
+                                multiple = FALSE),
+                    
+                    # Text box to enter the narrative
+                    textInput(
+                        inputId = 'narrative_input',
+                        label = 'Narrative',
+                        value = 'Enter narrative'
+                    ),
+                    
+                    # This button will activate the model
+                    actionButton(inputId = "clicks", "Submit")
+                    
+                ),
+                    
+                    mainPanel(
+                    tabPanel('Predicted Response', textOutput(outputId = "predicted_response")))
+            )
         )
     )
 )
@@ -305,6 +348,33 @@ ui = fluidPage(
 ##################
 
 server = function(input, output, session){
+    
+    # The filler value to be shown to user
+    predicted_text <- reactiveValues(t = "Waiting...")
+    
+    # Collect the narrative into new_narrative when Submit is clicked.
+    observeEvent(input$clicks, 
+                 {
+                     #### To enable python script to work in R #####
+                     # library(reticulate)
+                     #use_condaenv("r-reticulate")
+                     #conda_create("r-reticulate")
+                     # These libraries will need to be installed in this environment
+                     # conda_install("r-reticulate", "scikit-learn")
+                     # reticulate::conda_install("r-reticulate", "pandas")
+                     # reticulate::conda_install("r-reticulate", "numpy")
+                     # py_install("pandas")
+                     # py_install("scikit-learn")
+                     # use_condaenv("r-reticulate")
+                     # source_python('predict_narrative.py')
+                     predicted_text$t <- predict_narrative(input$narrative_input)
+                 }
+                 )
+    ## 1 new_narrative <- eventReactive(input$clicks, {input$narrative_input})
+    
+    # Send the new_narrative to python model to get prediction back.
+    output$predicted_response <- renderText(predicted_text$t)
+    
     output$ex1 <- DT::renderDataTable(
         DT::datatable(df_new, 
                       caption = 'Table 1: This is a simple data table for the complaints.',
